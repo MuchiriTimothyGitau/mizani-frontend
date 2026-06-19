@@ -150,6 +150,10 @@ input {
   font-size: 1.15rem;
 }
 
+.metrics.extra {
+  margin-top: 14px;
+}
+
 .high {
   color: #dc2626;
 }

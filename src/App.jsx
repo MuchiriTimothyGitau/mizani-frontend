@@ -4,6 +4,10 @@ import { BrowserProvider, Contract, parseUnits } from 'ethers';
 import { PAYMENT_LOG_ABI, PAYMENT_LOG_ADDRESS } from './contract.js';
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+const fujiChainId = '0xa869';
+const maxLabelLength = 120;
+const minAmountAvax = 0.0001;
+const maxAmountAvax = 1000;
 
 function parseNumber(value) {
   if (value === undefined || value === null || value === '') return NaN;
@@ -24,6 +28,16 @@ function months(value) {
   return value.toFixed(1);
 }
 
+function percent(value) {
+  if (!Number.isFinite(value)) return '0%';
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function ratio(value) {
+  if (!Number.isFinite(value)) return '0x';
+  return `${value.toFixed(2)}x`;
+}
+
 function normalizeRows(rawRows) {
   return rawRows
     .map((row) => {
@@ -31,12 +45,33 @@ function normalizeRows(rawRows) {
       const balance = parseNumber(row.Balance ?? row.balance);
       return {
         date: row.Date ?? row.date ?? '',
-        description: row.Description ?? row.description ?? row.Narration ?? row.narration ?? row.Details ?? row.details ?? '',
+        description: String(row.Description ?? row.description ?? row.Narration ?? row.narration ?? row.Details ?? row.details ?? '').slice(0, maxLabelLength),
         amount,
         balance: Number.isFinite(balance) ? balance : undefined,
       };
     })
     .filter((row) => Number.isFinite(row.amount));
+}
+
+async function ensureFujiNetwork() {
+  try {
+    await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: fujiChainId }] });
+  } catch (switchError) {
+    if (switchError?.code === 4902) {
+      await window.ethereum.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId: fujiChainId,
+          chainName: 'Fuji Testnet',
+          nativeCurrency: { name: 'Fuji AVAX', symbol: 'AVAX', decimals: 18 },
+          rpcUrls: ['https://api.avax-testnet.com/ext/bc/C/rpc'],
+          blockExplorerUrls: ['https://testnet.snowtrace.io'],
+        }],
+      });
+      return;
+    }
+    throw switchError;
+  }
 }
 
 export default function App() {
@@ -124,24 +159,40 @@ export default function App() {
     }
   }
 
+  function validRecordInput() {
+    const amount = Number(recordAmount);
+    if (recordLabel.trim().length === 0 || recordLabel.trim().length > maxLabelLength) {
+      setRecordStatus(`Payment label must be 1-${maxLabelLength} characters.`);
+      return false;
+    }
+    if (!Number.isFinite(amount) || amount < minAmountAvax || amount > maxAmountAvax) {
+      setRecordStatus(`Enter an AVAX amount between ${minAmountAvax} and ${maxAmountAvax}.`);
+      return false;
+    }
+    return true;
+  }
+
   async function recordPayment() {
     if (!PAYMENT_LOG_ADDRESS) {
       setRecordStatus('PaymentLog address is not configured yet.');
       return;
     }
     if (!window.ethereum) {
-      setRecordStatus('Install or open MetaMask to record a Fuji payment.');
+      setRecordStatus('Open Core Wallet or MetaMask to record a Fuji payment.');
       return;
     }
+    if (!validRecordInput()) return;
 
-    setRecordStatus('Requesting wallet signature...');
+    setRecordStatus('Switching wallet to Fuji testnet...');
     setError('');
 
     try {
+      await ensureFujiNetwork();
+      setRecordStatus('Requesting wallet signature...');
       const provider = new BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
       const contract = new Contract(PAYMENT_LOG_ADDRESS, PAYMENT_LOG_ABI, signer);
-      const tx = await contract.recordPayment(recordLabel, parseUnits(recordAmount, 18));
+      const tx = await contract.recordPayment(recordLabel.trim(), parseUnits(recordAmount, 18));
       setRecordStatus('Waiting for Fuji confirmation...');
       await tx.wait();
       setRecordStatus(`Recorded on Fuji. Tx: ${tx.hash}`);
@@ -158,8 +209,8 @@ export default function App() {
       <section className="hero">
         <div>
           <p className="eyebrow">Kuzana Bounty 1 MVP</p>
-          <h1>Cash Flow Risk Tool</h1>
-          <p>Upload a simulated Zoho CSV, score runway risk, read one Fuji testnet payment log, and generate a plain-language finance note.</p>
+          <h1>Startup Cash Flow Risk Tool</h1>
+          <p>Upload a simulated Zoho CSV, score runway and concentration risk, record one Fuji testnet payment, and generate a plain-language finance note.</p>
         </div>
         <div className="pill">Simulated Zoho via CSV</div>
       </section>
@@ -170,7 +221,7 @@ export default function App() {
           <input type="file" accept=".csv,text/csv" onChange={handleFile} />
           <a className="link" href="/sample-transactions.csv" download>Download sample SME CSV</a>
           <button onClick={scoreCsv} disabled={!rows.length || loading}>{loading ? 'Scoring...' : 'Score CSV'}</button>
-          {rows.length > 0 && <p className="muted">{rows.length} transactions loaded.</p>}
+          {rows.length > 0 && <p className="muted">{rows.length} transactions loaded. Raw rows never leave your browser until you click Score CSV.</p>}
         </div>
 
         <div className="card">
@@ -183,6 +234,14 @@ export default function App() {
               <div><span>Monthly burn</span><strong>{money(score.burnRate)}</strong></div>
               <div><span>Runway</span><strong>{months(score.runwayMonths)} months</strong></div>
               <div><span>Risk</span><strong className={score.riskLevel}>{score.riskLevel}</strong></div>
+              {score.metrics && (
+                <>
+                  <div><span>Outflow / inflow</span><strong>{ratio(score.metrics.inflowOutflowRatio)}</strong></div>
+                  <div><span>Top inflow share</span><strong>{percent(score.metrics.topInflowShare)}</strong></div>
+                  <div><span>Largest expense share</span><strong>{percent(score.metrics.largestExpenseShare)}</strong></div>
+                  <div><span>Burn acceleration</span><strong>{percent(score.metrics.burnAcceleration)}</strong></div>
+                </>
+              )}
             </div>
           )}
           {score?.flags?.length > 0 && (
