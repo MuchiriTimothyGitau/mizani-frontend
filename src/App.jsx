@@ -215,6 +215,37 @@ export default function App() {
         <div className="pill">Simulated Zoho via CSV</div>
       </section>
 
+      <section className="policy">
+        <h2>User policy and reliance information</h2>
+        <div className="policy-grid">
+          <div>
+            <strong>Use this for</strong>
+            <p>Early cash-flow awareness, founder conversations, and deciding what to check first.</p>
+          </div>
+          <div>
+            <strong>Do not rely on it for</strong>
+            <p>Accounting, tax, legal, audit, credit, or investment decisions without human review.</p>
+          </div>
+          <div>
+            <strong>Data source</strong>
+            <p>The Zoho integration is simulated through CSV upload. Confirm important figures against the actual accounting system.</p>
+          </div>
+          <div>
+            <strong>AI report</strong>
+            <p>The Gemini note is decision support only. It summarizes the numbers provided and may miss context not present in the CSV.</p>
+          </div>
+          <div>
+            <strong>On-chain payment</strong>
+            <p>Fuji testnet payments are proof that a wallet recorded an event, not proof of a real-world customer payment unless you verify it offline.</p>
+          </div>
+          <div>
+            <strong>Privacy</strong>
+            <p>Do not upload unnecessary personal data. The app sends only the CSV rows you choose to the backend score/report endpoints.</p>
+          </div>
+        </div>
+        <p className="policy-note">Before acting on any flag, reconcile the CSV balance, check supporting invoices or receipts, and confirm management approvals for unusual withdrawals or large expenses.</p>
+      </section>
+
       <section className="grid">
         <div className="card">
           <h2>1. CSV cash-flow upload</h2>
