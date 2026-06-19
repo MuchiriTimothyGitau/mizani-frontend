@@ -24,7 +24,7 @@ function money(value) {
 }
 
 function months(value) {
-  if (!Number.isFinite(value)) return '0';
+  if (!Number.isFinite(value)) return '0.0';
   return value.toFixed(1);
 }
 
@@ -74,6 +74,89 @@ async function ensureFujiNetwork() {
   }
 }
 
+function getRiskConfig(score) {
+  if (!score) return { tone: 'neutral', percent: 0, label: 'Awaiting CSV' };
+  if (score.riskLevel === 'high') return { tone: 'danger', percent: 88, label: 'High risk' };
+  if (score.riskLevel === 'medium') return { tone: 'warning', percent: 58, label: 'Watchlist' };
+  return { tone: 'safe', percent: 24, label: 'Low risk' };
+}
+
+function runwayLabel(score) {
+  if (!score) return 'No runway calculated yet';
+  if (!Number.isFinite(score.runwayMonths)) return 'Runway unclear';
+  if (score.runwayMonths < 1) return 'Critical runway';
+  if (score.runwayMonths < 3) return 'Below 3-month runway';
+  if (score.runwayMonths < 6) return 'Thin runway';
+  return 'Healthy runway';
+}
+
+function formatDate(timestamp) {
+  if (!timestamp) return 'No timestamp';
+  const date = new Date(Number(timestamp) * 1000);
+  if (Number.isNaN(date.getTime())) return 'Pending timestamp';
+  return date.toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function MetricCard({ label, value, hint, tone = 'default' }) {
+  return (
+    <div className={`metric-card ${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {hint && <small>{hint}</small>}
+    </div>
+  );
+}
+
+function SourceCard({ title, description, badge }) {
+  return (
+    <div className="source-card">
+      <div className="source-card-head">
+        <span>{badge}</span>
+      </div>
+      <strong>{title}</strong>
+      <p>{description}</p>
+    </div>
+  );
+}
+
+function FlagList({ flags }) {
+  if (!flags?.length) {
+    return <p className="empty-state">No material flags detected from the uploaded CSV yet.</p>;
+  }
+
+  return (
+    <ul className="flag-list">
+      {flags.map((flag, index) => (
+        <li key={index}>
+          <span>{index + 1}</span>
+          <p>{flag}</p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function PaymentList({ payments }) {
+  if (!payments?.length) {
+    return <p className="empty-state">No Fuji payments have been recorded yet.</p>;
+  }
+
+  return (
+    <div className="payment-list">
+      {payments.map((payment) => (
+        <div className="payment-item" key={payment.transactionHash}>
+          <div>
+            <strong>{payment.label}</strong>
+            <small>{formatDate(payment.timestamp)}</small>
+          </div>
+          <div className="payment-amount">{Number(payment.amount).toFixed(4)} AVAX</div>
+          <code>{payment.sender}</code>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function App() {
   const [rows, setRows] = useState([]);
   const [score, setScore] = useState(null);
@@ -85,6 +168,9 @@ export default function App() {
   const [recordAmount, setRecordAmount] = useState('0.01');
   const [recordStatus, setRecordStatus] = useState('');
   const [error, setError] = useState('');
+
+  const risk = getRiskConfig(score);
+  const runwayPercent = score && Number.isFinite(score.runwayMonths) ? Math.min(100, Math.max(0, (score.runwayMonths / 6) * 100)) : 0;
 
   async function loadPayments() {
     try {
@@ -113,6 +199,7 @@ export default function App() {
         setScore(null);
         setReport('');
         setError('');
+        setRecordStatus('');
       },
       error: (err) => setError(err.message),
     });
@@ -122,6 +209,7 @@ export default function App() {
     if (!rows.length) return;
     setLoading(true);
     setError('');
+    setRecordStatus('');
     try {
       const response = await fetch(`${backendUrl}/score`, {
         method: 'POST',
@@ -205,119 +293,212 @@ export default function App() {
   }
 
   return (
-    <main className="app">
+    <main className="app-shell">
+      <div className="topbar">
+        <div className="brand">
+          <span className="brand-mark" />
+          <div>
+            <strong>Mizani</strong>
+            <span>Cash Flow Risk Tool</span>
+          </div>
+        </div>
+        <div className="topbar-status">
+          <span className="pulse" />
+          Kuzana MVP on dev
+        </div>
+      </div>
+
       <section className="hero">
-        <div>
-          <p className="eyebrow">Kuzana Bounty 1 MVP</p>
-          <h1>Startup Cash Flow Risk Tool</h1>
-          <p>Upload a simulated Zoho CSV, score runway and concentration risk, record one Fuji testnet payment, and generate a plain-language finance note.</p>
-        </div>
-        <div className="pill">Simulated Zoho via CSV</div>
-      </section>
-
-      <section className="policy">
-        <h2>User policy and reliance information</h2>
-        <div className="policy-grid">
-          <div>
-            <strong>Use this for</strong>
-            <p>Early cash-flow awareness, founder conversations, and deciding what to check first.</p>
-          </div>
-          <div>
-            <strong>Do not rely on it for</strong>
-            <p>Accounting, tax, legal, audit, credit, or investment decisions without human review.</p>
-          </div>
-          <div>
-            <strong>Data source</strong>
-            <p>The Zoho integration is simulated through CSV upload. Confirm important figures against the actual accounting system.</p>
-          </div>
-          <div>
-            <strong>AI report</strong>
-            <p>The Gemini note is decision support only. It summarizes the numbers provided and may miss context not present in the CSV.</p>
-          </div>
-          <div>
-            <strong>On-chain payment</strong>
-            <p>Fuji testnet payments are proof that a wallet recorded an event, not proof of a real-world customer payment unless you verify it offline.</p>
-          </div>
-          <div>
-            <strong>Privacy</strong>
-            <p>Do not upload unnecessary personal data. The app sends only the CSV rows you choose to the backend score/report endpoints.</p>
+        <div className="hero-copy">
+          <p className="eyebrow">Kuzana Bounty 1 · Stage 1 MVP</p>
+          <h1>See cash-flow risk before it becomes a founder emergency.</h1>
+          <p>Upload a simulated Zoho CSV, score runway and concentration risk, generate a plain-language finance note, and pair it with one Fuji testnet payment event.</p>
+          <div className="hero-actions">
+            <a href="#upload" className="primary-link">Start with CSV</a>
+            <a href="#chain" className="secondary-link">View on-chain proof</a>
           </div>
         </div>
-        <p className="policy-note">Before acting on any flag, reconcile the CSV balance, check supporting invoices or receipts, and confirm management approvals for unusual withdrawals or large expenses.</p>
-      </section>
-
-      <section className="grid">
-        <div className="card">
-          <h2>1. CSV cash-flow upload</h2>
-          <input type="file" accept=".csv,text/csv" onChange={handleFile} />
-          <a className="link" href="/sample-transactions.csv" download>Download sample SME CSV</a>
-          <button onClick={scoreCsv} disabled={!rows.length || loading}>{loading ? 'Scoring...' : 'Score CSV'}</button>
-          {rows.length > 0 && <p className="muted">{rows.length} transactions loaded. Raw rows never leave your browser until you click Score CSV.</p>}
-        </div>
-
-        <div className="card">
-          <h2>2. Risk score</h2>
-          {!score ? (
-            <p className="muted">Upload and score a CSV to see balance, burn rate, runway, and flags.</p>
-          ) : (
-            <div className="metrics">
-              <div><span>Balance</span><strong>{money(score.balance)}</strong></div>
-              <div><span>Monthly burn</span><strong>{money(score.burnRate)}</strong></div>
-              <div><span>Runway</span><strong>{months(score.runwayMonths)} months</strong></div>
-              <div><span>Risk</span><strong className={score.riskLevel}>{score.riskLevel}</strong></div>
-              {score.metrics && (
-                <>
-                  <div><span>Outflow / inflow</span><strong>{ratio(score.metrics.inflowOutflowRatio)}</strong></div>
-                  <div><span>Top inflow share</span><strong>{percent(score.metrics.topInflowShare)}</strong></div>
-                  <div><span>Largest expense share</span><strong>{percent(score.metrics.largestExpenseShare)}</strong></div>
-                  <div><span>Burn acceleration</span><strong>{percent(score.metrics.burnAcceleration)}</strong></div>
-                </>
-              )}
+        <div className="hero-panel">
+          <div className="hero-panel-header">
+            <span>Live risk position</span>
+            <strong>{risk.label}</strong>
+          </div>
+          <div className={`risk-gauge ${risk.tone}`} style={{ '--risk-angle': `${risk.percent * 3.6}deg` }}>
+            <div>
+              <strong>{score ? score.riskLevel : 'Pending'}</strong>
+              <span>{runwayLabel(score)}</span>
             </div>
-          )}
-          {score?.flags?.length > 0 && (
-            <ul className="flags">
-              {score.flags.map((flag, index) => <li key={index}>{flag}</li>)}
-            </ul>
-          )}
-        </div>
-
-        <div className="card">
-          <h2>3. AI finance note</h2>
-          <button onClick={generateReport} disabled={!score || reportLoading}>{reportLoading ? 'Generating...' : 'Generate Gemini report'}</button>
-          {report && <article className="report">{report}</article>}
+          </div>
+          <div className="runway-copy">
+            <span>Runway target</span>
+            <strong>{score ? `${months(score.runwayMonths)} months` : 'Upload CSV'}</strong>
+            <div className="runway-bar"><i style={{ width: `${runwayPercent}%` }} /></div>
+          </div>
         </div>
       </section>
 
-      <section className="grid two">
-        <div className="card">
-          <h2>4. Record Fuji payment</h2>
-          <input value={recordLabel} onChange={(event) => setRecordLabel(event.target.value)} placeholder="Payment label" />
-          <input value={recordAmount} onChange={(event) => setRecordAmount(event.target.value)} placeholder="Amount AVAX" />
-          <button onClick={recordPayment}>Record Payment</button>
-          {recordStatus && <p className="muted">{recordStatus}</p>}
-          {!PAYMENT_LOG_ADDRESS && <p className="warning">Set VITE_PAYMENT_LOG_ADDRESS after deploying PaymentLog.sol.</p>}
+      <section className="source-strip" aria-label="Data sources">
+        <SourceCard title="Simulated Zoho CSV" badge="CSV" description="Fast MVP path for founders without a live accounting integration." />
+        <SourceCard title="Rule-based scorer" badge="Rules" description="Burn rate, runway, concentration, burn acceleration, and unusual withdrawals." />
+        <SourceCard title="Gemini finance note" badge="AI" description="Plain-language explanation written from scored numbers only." />
+        <SourceCard title="Fuji payment log" badge="Chain" description="One on-chain event used as a second data source for the MVP." />
+      </section>
+
+      <section className="policy" aria-label="User policy and reliance information">
+        <div>
+          <p className="eyebrow">Reliance policy</p>
+          <h2>Use this as an early-warning cockpit, not as accounting advice.</h2>
+        </div>
+        <div className="policy-grid">
+          <div><strong>Use for</strong><p>Founder checks, cash-flow conversations, and deciding what to reconcile first.</p></div>
+          <div><strong>Do not use for</strong><p>Tax, audit, credit, legal, or investment decisions without human review.</p></div>
+          <div><strong>CSV source</strong><p>Zoho is simulated through CSV upload. Confirm important figures against the actual accounting system.</p></div>
+          <div><strong>AI note</strong><p>Gemini summarizes the scored data and may miss context not present in the CSV.</p></div>
+          <div><strong>On-chain proof</strong><p>Fuji events prove a wallet recorded data, not that a real customer paid unless verified offline.</p></div>
+          <div><strong>Privacy</strong><p>Do not upload unnecessary personal data. Raw CSV rows are only sent when you click Score CSV.</p></div>
+        </div>
+      </section>
+
+      <section className="dashboard-grid" id="upload">
+        <div className="card upload-card">
+          <div className="card-head">
+            <div>
+              <p className="eyebrow">Step 1</p>
+              <h2>Upload cash-flow CSV</h2>
+            </div>
+            <span className="step-badge">{rows.length} rows</span>
+          </div>
+          <div className="upload-zone">
+            <input aria-label="Upload CSV transactions" type="file" accept=".csv,text/csv" onChange={handleFile} />
+            <div>
+              <strong>Drop or choose a CSV</strong>
+              <p>Columns can include Date, Description, Amount, Credit, Debit, and Balance.</p>
+            </div>
+          </div>
+          <a className="inline-link" href="/sample-transactions.csv" download>Download sample SME CSV</a>
+          <button onClick={scoreCsv} disabled={!rows.length || loading}>{loading ? 'Scoring...' : 'Score CSV'}</button>
+          {rows.length > 0 && <p className="helper-text">Raw rows stay in the browser until you submit them for scoring.</p>}
         </div>
 
-        <div className="card">
-          <h2>5. Recent on-chain payments</h2>
-          {payments.length === 0 ? (
-            <p className="muted">No Fuji payments loaded yet.</p>
+        <div className="card score-card">
+          <div className="card-head">
+            <div>
+              <p className="eyebrow">Step 2</p>
+              <h2>Risk score</h2>
+            </div>
+            <span className={`risk-pill ${score?.riskLevel || 'neutral'}`}>{score?.riskLevel || 'No score'}</span>
+          </div>
+
+          {!score ? (
+            <div className="empty-panel">
+              <strong>No score yet</strong>
+              <p>Upload and score a CSV to calculate balance, burn rate, runway, and startup-specific risk signals.</p>
+            </div>
           ) : (
-            <ul className="payments">
-              {payments.map((payment) => (
-                <li key={payment.transactionHash}>
-                  <strong>{payment.label}</strong>
-                  <span>{Number(payment.amount).toFixed(4)} AVAX</span>
-                  <small>{payment.sender}</small>
-                </li>
-              ))}
-            </ul>
+            <>
+              <div className="metric-grid">
+                <MetricCard label="Balance" value={money(score.balance)} tone="blue" />
+                <MetricCard label="Monthly burn" value={money(score.burnRate)} tone="purple" />
+                <MetricCard label="Runway" value={`${months(score.runwayMonths)} mo`} tone={score.runwayMonths < 3 ? 'danger' : 'safe'} />
+                <MetricCard label="Outflow / inflow" value={ratio(score.metrics?.inflowOutflowRatio)} tone="amber" />
+                <MetricCard label="Top inflow share" value={percent(score.metrics?.topInflowShare)} tone="amber" />
+                <MetricCard label="Largest expense" value={percent(score.metrics?.largestExpenseShare)} tone="purple" />
+              </div>
+              <div className="insight-row">
+                <div><span>Burn acceleration</span><strong>{percent(score.metrics?.burnAcceleration)}</strong></div>
+                <div><span>Days since inflow</span><strong>{score.metrics?.daysSinceLastInflow ?? 'N/A'}</strong></div>
+                <div><span>Has balance column</span><strong>{score.metrics?.hasBalanceColumn ? 'Yes' : 'No'}</strong></div>
+              </div>
+            </>
           )}
+
+          <div className="card-section">
+            <h3>Flags to investigate</h3>
+            <FlagList flags={score?.flags} />
+          </div>
+        </div>
+
+        <div className="card report-card">
+          <div className="card-head">
+            <div>
+              <p className="eyebrow">Step 3</p>
+              <h2>AI finance note</h2>
+            </div>
+          </div>
+          <p className="helper-text">Generate a concise controller-style note from the scored numbers. The report excludes raw CSV rows.</p>
+          <button onClick={generateReport} disabled={!score || reportLoading}>{reportLoading ? 'Generating...' : 'Generate Gemini report'}</button>
+          {report ? <article className="report">{report}</article> : <div className="report-placeholder">The finance note will appear here after scoring.</div>}
         </div>
       </section>
 
-      {error && <div className="error">{error}</div>}
+      <section className="dashboard-grid split" id="chain">
+        <div className="card chain-card">
+          <div className="card-head">
+            <div>
+              <p className="eyebrow">Step 4</p>
+              <h2>Record Fuji payment</h2>
+            </div>
+            <span className="chain-badge">Fuji testnet</span>
+          </div>
+          <div className="field">
+            <label>Payment label</label>
+            <input value={recordLabel} onChange={(event) => setRecordLabel(event.target.value)} placeholder="Customer deposit - Fuji test" />
+          </div>
+          <div className="field">
+            <label>Amount in AVAX</label>
+            <input value={recordAmount} onChange={(event) => setRecordAmount(event.target.value)} placeholder="0.01" />
+          </div>
+          <button onClick={recordPayment}>Record Payment</button>
+          {recordStatus && <p className="status-text">{recordStatus}</p>}
+          {!PAYMENT_LOG_ADDRESS && <p className="warning">Set VITE_PAYMENT_LOG_ADDRESS after deploying PaymentLog.sol.</p>}
+          {PAYMENT_LOG_ADDRESS && <a className="inline-link" href={`https://testnet.snowtrace.io/address/${PAYMENT_LOG_ADDRESS}`} target="_blank" rel="noreferrer">Open contract on Snowtrace</a>}
+        </div>
+
+        <div className="card payments-card">
+          <div className="card-head">
+            <div>
+              <p className="eyebrow">Step 5</p>
+              <h2>Recent on-chain payments</h2>
+            </div>
+            <button className="ghost-button" onClick={loadPayments}>Refresh</button>
+          </div>
+          <PaymentList payments={payments} />
+        </div>
+      </section>
+
+      <section className="dashboard-grid split">
+        <div className="card founder-card">
+          <div className="card-head">
+            <div>
+              <p className="eyebrow">Founder checklist</p>
+              <h2>What to check this week</h2>
+            </div>
+          </div>
+          <ul className="check-list">
+            <li>Reconcile the CSV balance against bank, M-Pesa, and accounting records.</li>
+            <li>Confirm the largest inflow customer and whether that concentration is repeatable.</li>
+            <li>Review the largest expense and any round-number withdrawals for approval.</li>
+            <li>Track cash collected, cash outflow, runway, and days since last inflow weekly.</li>
+          </ul>
+        </div>
+
+        <div className="card trust-card">
+          <div className="card-head">
+            <div>
+              <p className="eyebrow">Trust controls</p>
+              <h2>What makes this MVP safe to demo</h2>
+            </div>
+          </div>
+          <div className="trust-grid">
+            <div><strong>No private keys</strong><span>Backend reads chain only; wallet signs in browser.</span></div>
+            <div><strong>Server-side AI</strong><span>Gemini key stays in backend environment variables.</span></div>
+            <div><strong>Input limits</strong><span>Label length, amount range, row count, and JSON size are constrained.</span></div>
+            <div><strong>Honest scope</strong><span>Zoho is simulated via CSV and Fuji is testnet data.</span></div>
+          </div>
+        </div>
+      </section>
+
+      {error && <div className="toast" role="alert">{error}</div>}
     </main>
   );
 }
