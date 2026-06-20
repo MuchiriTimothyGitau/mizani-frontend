@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import Papa from 'papaparse';
 import { BrowserProvider, Contract, parseUnits } from 'ethers';
 import { PAYMENT_LOG_ABI, PAYMENT_LOG_ADDRESS as ENV_PAYMENT_LOG_ADDRESS } from './contract.js';
+import { fetchConfig, fetchPayments, execScoreCsv, execGenerateReport } from './api.js';
 
-const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 const fujiChainId = '0xa869';
 const maxLabelLength = 120;
 const minAmountAvax = 0.0001;
@@ -308,8 +308,7 @@ export default function App() {
 
   async function loadConfig() {
     try {
-      const response = await fetch(`${backendUrl}/config`);
-      const data = await response.json();
+      const data = await fetchConfig();
       setConfig(data);
       setPaymentLogAddress(data.paymentLogAddress || ENV_PAYMENT_LOG_ADDRESS);
     } catch (err) {
@@ -320,10 +319,9 @@ export default function App() {
 
   async function loadPayments() {
     try {
-      const response = await fetch(`${backendUrl}/onchain-payments`);
-      const data = await response.json();
-      setPayments(data.payments || []);
-      if (data.paymentLogAddress) setPaymentLogAddress(data.paymentLogAddress);
+      const response = await fetchPayments();
+      setPayments(response.payments || []);
+      if (response.paymentLogAddress) setPaymentLogAddress(response.paymentLogAddress);
     } catch (err) {
       setPayments([]);
     }
@@ -445,13 +443,8 @@ export default function App() {
     setRecordStatus('');
     setActiveSection('score');
     try {
-      const response = await fetch(`${backendUrl}/score`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transactions: rows }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error?.message || data.error || 'Scoring failed');
+      const data = await execScoreCsv(rows);
+      if (data.error) throw new Error(data.error?.message || data.error || 'Scoring failed');
       setScore(data);
       setReport('');
       setReportCopied(false);
@@ -470,13 +463,9 @@ export default function App() {
     setError('');
     setActiveSection('report');
     try {
-      const response = await fetch(`${backendUrl}/report`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ score }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error?.message || data.error || 'Report failed');
+      const response = await execGenerateReport(score);
+      const data = response;
+      if (response.error) throw new Error(response.error?.message || response.error || 'Report failed');
       setReport(data.report || '');
       setReportCopied(false);
       setReportGeneratedAt(data.generatedAt ? new Date(data.generatedAt).toLocaleString('en-KE') : '');

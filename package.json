@@ -6,15 +6,19 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "deploy:functions": "node ../scripts/deploy-functions.mjs"
   },
-  "dependencies": {
+"dependencies": {
     "@vitejs/plugin-react": "latest",
     "vite": "latest",
     "react": "latest",
     "react-dom": "latest",
     "papaparse": "latest",
-    "ethers": "^6.13.5"
+    "ethers": "^6.13.5",
+    "appwrite": "latest"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "dotenv": "latest"
+  }
 }
