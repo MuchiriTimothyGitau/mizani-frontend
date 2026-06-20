@@ -97,12 +97,41 @@ function formatDate(timestamp) {
   return date.toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+function formatTime() {
+  return new Date().toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
+}
+
+function shortHash(value) {
+  if (!value || value.length < 12) return value || '';
+  return `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
+function isAddress(value) {
+  return typeof value === 'string' && /^0x[a-fA-F0-9]{40}$/.test(value);
+}
+
 function MetricCard({ label, value, hint, tone = 'default' }) {
   return (
     <div className={`metric-card ${tone}`}>
       <span>{label}</span>
       <strong>{value}</strong>
       {hint && <small>{hint}</small>}
+    </div>
+  );
+}
+
+function SkeletonRow({ height = '18px' }) {
+  return (
+    <div className="skeleton-row" style={{ height }} />
+  );
+}
+
+function SkeletonGrid() {
+  return (
+    <div className="skeleton-grid">
+      {Array.from({ length: 6 }).map((_, index) => (
+        <SkeletonRow key={index} />
+      ))}
     </div>
   );
 }
@@ -179,10 +208,76 @@ function PaymentList({ payments }) {
   );
 }
 
+function StatusDock({ backendStatus, paymentCount, walletStatus }) {
+  return (
+    <section className="status-dock" aria-label="Live dashboard status">
+      <div className="status-tile">
+        <span>Backend</span>
+        <strong>{backendStatus}</strong>
+      </div>
+      <div className="status-tile">
+        <span>Fuji events</span>
+        <strong>{paymentCount}</strong>
+      </div>
+      <div className="status-tile">
+        <span>Wallet</span>
+        <strong>{walletStatus}</strong>
+      </div>
+      <div className="status-tile">
+        <span>Refresh</span>
+        <strong>15s</strong>
+      </div>
+    </section>
+  );
+}
+
+function ActivityFeed({ items }) {
+  if (!items.length) {
+    return (
+      <section className="activity-feed">
+        <div className="activity-head">
+          <span>Activity stream</span>
+          <strong>Waiting for action</strong>
+        </div>
+        <p className="empty-state">Upload a CSV, generate the report, or record a Fuji event to see live updates.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="activity-feed">
+      <div className="activity-head">
+        <span>Activity stream</span>
+        <strong>{items.length} latest updates</strong>
+      </div>
+      <div className="activity-list">
+        {items.map((item) => (
+          <div className={`activity-item ${item.tone}`} key={item.id}>
+            <span>{item.time}</span>
+            <strong>{item.message}</strong>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function TopRiskCard({ score }) {
+  if (!score?.flags?.length) return null;
+
+  return (
+    <div className="top-risk-card">
+      <span>Highest priority</span>
+      <p>{score.flags[0]}</p>
+    </div>
+  );
+}
+
 export default function App() {
   const [rows, setRows] = useState([]);
   const [score, setScore] = useState(null);
   const [report, setReport] = useState('');
+  const [reportCopied, setReportCopied] = useState(false);
   const [reportGeneratedAt, setReportGeneratedAt] = useState('');
   const [loading, setLoading] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
@@ -192,11 +287,24 @@ export default function App() {
   const [recordLabel, setRecordLabel] = useState('Customer deposit - Fuji test');
   const [recordAmount, setRecordAmount] = useState('0.01');
   const [recordStatus, setRecordStatus] = useState('');
+  const [copiedAddress, setCopiedAddress] = useState(false);
   const [error, setError] = useState('');
   const [activeSection, setActiveSection] = useState('overview');
+  const [walletStatus, setWalletStatus] = useState('Detecting wallet');
+  const [activityLog, setActivityLog] = useState([]);
 
   const risk = getRiskConfig(score);
   const runwayPercent = score && Number.isFinite(score.runwayMonths) ? Math.min(100, Math.max(0, (score.runwayMonths / 6) * 100)) : 0;
+  const backendStatus = config?.geminiConfigured && config?.fujiRpcConfigured ? 'Backend ready' : config?.geminiConfigured ? 'Gemini ready' : config ? 'Backend connected' : 'Connecting';
+  const csvInflows = rows.filter((row) => row.amount > 0).reduce((sum, row) => sum + row.amount, 0);
+  const csvOutflows = rows.filter((row) => row.amount < 0).reduce((sum, row) => sum + Math.abs(row.amount), 0);
+
+  function addActivity(message, tone = 'info') {
+    setActivityLog((items) => [
+      { id: `${Date.now()}-${Math.random()}`, time: formatTime(), message, tone },
+      ...items,
+    ].slice(0, 6));
+  }
 
   async function loadConfig() {
     try {
@@ -205,6 +313,7 @@ export default function App() {
       setConfig(data);
       setPaymentLogAddress(data.paymentLogAddress || ENV_PAYMENT_LOG_ADDRESS);
     } catch (err) {
+      setConfig(null);
       setPaymentLogAddress(ENV_PAYMENT_LOG_ADDRESS);
     }
   }
@@ -214,16 +323,97 @@ export default function App() {
       const response = await fetch(`${backendUrl}/onchain-payments`);
       const data = await response.json();
       setPayments(data.payments || []);
-      if (data.contractExplorerUrl) setPaymentLogAddress(data.contractExplorerUrl);
+      if (data.paymentLogAddress) setPaymentLogAddress(data.paymentLogAddress);
     } catch (err) {
       setPayments([]);
     }
   }
 
   useEffect(() => {
-    loadConfig();
-    loadPayments();
+    let cancelled = false;
+
+    async function bootstrap() {
+      await loadConfig();
+      await loadPayments();
+      if (!cancelled) addActivity('Live dashboard connected', 'success');
+    }
+
+    bootstrap();
+    const interval = setInterval(() => loadPayments(), 15000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!window.ethereum) {
+      setWalletStatus('Wallet not detected');
+      return;
+    }
+
+    setWalletStatus('Wallet detected');
+
+    const handleAccounts = (accounts) => setWalletStatus(accounts.length ? 'Wallet connected' : 'Wallet locked');
+    const handleChain = () => setWalletStatus('Wallet connected');
+
+    window.ethereum.on?.('accountsChanged', handleAccounts);
+    window.ethereum.on?.('chainChanged', handleChain);
+
+    return () => {
+      window.ethereum?.removeListener?.('accountsChanged', handleAccounts);
+      window.ethereum?.removeListener?.('chainChanged', handleChain);
+    };
+  }, []);
+
+  async function copyText(text) {
+    if (!text) return false;
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return true;
+  }
+
+  async function copyAddress() {
+    if (!isAddress(paymentLogAddress)) {
+      setRecordStatus('Contract address is not configured yet.');
+      return;
+    }
+
+    try {
+      await copyText(paymentLogAddress);
+      setCopiedAddress(true);
+      addActivity('Contract address copied', 'success');
+      setTimeout(() => setCopiedAddress(false), 1800);
+    } catch (err) {
+      setRecordStatus('Could not copy contract address.');
+    }
+  }
+
+  async function copyReport() {
+    if (!report) return;
+
+    try {
+      await copyText(report);
+      setReportCopied(true);
+      addActivity('Gemini report copied', 'success');
+      setTimeout(() => setReportCopied(false), 1800);
+    } catch (err) {
+      setRecordStatus('Could not copy report.');
+    }
+  }
 
   function handleFile(event) {
     const file = event.target.files?.[0];
@@ -237,9 +427,11 @@ export default function App() {
         setRows(normalized);
         setScore(null);
         setReport('');
+        setReportCopied(false);
         setReportGeneratedAt('');
         setError('');
         setRecordStatus('');
+        addActivity(`Loaded ${normalized.length} CSV rows`, 'success');
       },
       error: (err) => setError(err.message),
     });
@@ -247,6 +439,7 @@ export default function App() {
 
   async function scoreCsv() {
     if (!rows.length) return;
+    const started = performance.now();
     setLoading(true);
     setError('');
     setRecordStatus('');
@@ -261,7 +454,9 @@ export default function App() {
       if (!response.ok) throw new Error(data.error?.message || data.error || 'Scoring failed');
       setScore(data);
       setReport('');
+      setReportCopied(false);
       setReportGeneratedAt('');
+      addActivity(`Scored ${rows.length} rows in ${Math.round(performance.now() - started)}ms`, 'success');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -283,7 +478,9 @@ export default function App() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error?.message || data.error || 'Report failed');
       setReport(data.report || '');
+      setReportCopied(false);
       setReportGeneratedAt(data.generatedAt ? new Date(data.generatedAt).toLocaleString('en-KE') : '');
+      addActivity('Gemini finance note generated', 'success');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -305,7 +502,7 @@ export default function App() {
   }
 
   async function recordPayment() {
-    if (!paymentLogAddress || paymentLogAddress.startsWith('https://')) {
+    if (!isAddress(paymentLogAddress)) {
       setRecordStatus('PaymentLog address is not configured yet.');
       return;
     }
@@ -321,6 +518,7 @@ export default function App() {
 
     try {
       await ensureFujiNetwork();
+      setWalletStatus('Fuji network selected');
       setRecordStatus('Requesting wallet signature...');
       const provider = new BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
@@ -331,6 +529,7 @@ export default function App() {
       setRecordStatus(`Recorded on Fuji. Tx: ${tx.hash}`);
       setRecordLabel('Customer deposit - Fuji test');
       setRecordAmount('0.01');
+      addActivity(`Recorded Fuji event ${shortHash(tx.hash)}`, 'success');
       await loadPayments();
     } catch (err) {
       setRecordStatus(err?.message || 'Payment was not recorded.');
@@ -363,7 +562,7 @@ export default function App() {
         <a className="topbar-cta" href="#upload">Start demo</a>
         <div className="topbar-status">
           <span className="pulse" />
-          {config?.version || 'MVP'}
+          {backendStatus}
         </div>
       </div>
 
@@ -393,8 +592,15 @@ export default function App() {
             <strong>{score ? `${months(score.runwayMonths)} months` : 'Upload CSV'}</strong>
             <div className="runway-bar"><i style={{ width: `${runwayPercent}%` }} /></div>
           </div>
+          <div className="hero-status-row">
+            <span>{backendStatus}</span>
+            <button className="mini-button" onClick={copyAddress}>{copiedAddress ? 'Copied' : 'Copy contract'}</button>
+          </div>
         </div>
       </section>
+
+      <StatusDock backendStatus={backendStatus} paymentCount={`${payments.length} events`} walletStatus={walletStatus} />
+      <ActivityFeed items={activityLog} />
 
       <section className="source-strip" aria-label="Data sources">
         <SourceCard title="Simulated Zoho CSV" badge="CSV" description="Fast MVP path for founders without a live accounting integration." />
@@ -434,6 +640,11 @@ export default function App() {
               <p>Columns can include Date, Description, Amount, Credit, Debit, and Balance.</p>
             </div>
           </div>
+          <div className="mini-stat-row">
+            <div><span>CSV inflows</span><strong>{money(csvInflows)}</strong></div>
+            <div><span>CSV outflows</span><strong>{money(csvOutflows)}</strong></div>
+            <div><span>Net movement</span><strong>{money(csvInflows - csvOutflows)}</strong></div>
+          </div>
           <a className="inline-link" href="/sample-transactions.csv" download>Download sample SME CSV</a>
           <button onClick={scoreCsv} disabled={!rows.length || loading}>{loading ? 'Scoring...' : 'Score CSV'}</button>
           {rows.length > 0 && <p className="helper-text">Raw rows stay in the browser until you submit them for scoring.</p>}
@@ -448,13 +659,16 @@ export default function App() {
             <span className={`risk-pill ${score?.riskLevel || 'neutral'}`}>{score?.riskLevel || 'No score'}</span>
           </div>
 
-          {!score ? (
+          {!score && !loading ? (
             <div className="empty-panel">
               <strong>No score yet</strong>
               <p>Upload and score a CSV to calculate balance, burn rate, runway, and startup-specific risk signals.</p>
             </div>
+          ) : loading ? (
+            <SkeletonGrid />
           ) : (
             <>
+              <TopRiskCard score={score} />
               <div className="metric-grid">
                 <MetricCard label="Balance" value={money(score.balance)} tone="blue" />
                 <MetricCard label="Monthly burn" value={money(score.burnRate)} tone="purple" />
@@ -487,10 +701,13 @@ export default function App() {
               <p className="eyebrow">Step 3</p>
               <h2>AI finance note</h2>
             </div>
+            <button className="ghost-button" onClick={copyReport} disabled={!report}>{reportCopied ? 'Copied' : 'Copy'}</button>
           </div>
           <p className="helper-text">Generate a concise controller-style note from the scored numbers. The report excludes raw CSV rows.</p>
           <button onClick={generateReport} disabled={!score || reportLoading}>{reportLoading ? 'Generating...' : 'Generate Gemini report'}</button>
-          {report ? (
+          {reportLoading ? (
+            <SkeletonGrid />
+          ) : report ? (
             <>
               {reportGeneratedAt && <p className="report-meta">Generated {reportGeneratedAt}</p>}
               <article className="report">{report}</article>
@@ -508,6 +725,10 @@ export default function App() {
             </div>
             <span className="chain-badge">Fuji testnet</span>
           </div>
+          <div className="copy-row">
+            <code>{isAddress(paymentLogAddress) ? paymentLogAddress : 'Contract address not configured'}</code>
+            <button className="ghost-button" onClick={copyAddress} disabled={!isAddress(paymentLogAddress)}>{copiedAddress ? 'Copied' : 'Copy'}</button>
+          </div>
           <div className="field">
             <label>Payment label</label>
             <input value={recordLabel} onChange={(event) => setRecordLabel(event.target.value)} placeholder="Customer deposit - Fuji test" />
@@ -518,7 +739,7 @@ export default function App() {
           </div>
           <button onClick={recordPayment}>Record Payment</button>
           {recordStatus && <p className="status-text">{recordStatus}</p>}
-          {!paymentLogAddress || paymentLogAddress.startsWith('https://') ? <p className="warning">Set VITE_PAYMENT_LOG_ADDRESS or backend PAYMENT_LOG_ADDRESS after deploying PaymentLog.sol.</p> : <a className="inline-link" href={`${config?.snowtraceBaseUrl || 'https://testnet.snowtrace.io'}/address/${paymentLogAddress}`} target="_blank" rel="noreferrer">Open contract on Snowtrace</a>}
+          {!paymentLogAddress || !isAddress(paymentLogAddress) ? <p className="warning">Set VITE_PAYMENT_LOG_ADDRESS or backend PAYMENT_LOG_ADDRESS after deploying PaymentLog.sol.</p> : <a className="inline-link" href={`${config?.snowtraceBaseUrl || 'https://testnet.snowtrace.io'}/address/${paymentLogAddress}`} target="_blank" rel="noreferrer">Open contract on Snowtrace</a>}
         </div>
 
         <div className="card payments-card">
