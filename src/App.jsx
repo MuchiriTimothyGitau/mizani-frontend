@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import Papa from 'papaparse';
 import { BrowserProvider, Contract, parseUnits } from 'ethers';
-import { PAYMENT_LOG_ABI, PAYMENT_LOG_ADDRESS } from './contract.js';
+import { PAYMENT_LOG_ABI, PAYMENT_LOG_ADDRESS as ENV_PAYMENT_LOG_ADDRESS } from './contract.js';
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 const fujiChainId = '0xa869';
@@ -136,6 +136,27 @@ function FlagList({ flags }) {
   );
 }
 
+function CashFlowBars({ transactions }) {
+  const recent = transactions?.slice(-10) || [];
+  if (!recent.length) return <p className="empty-state">Cash movement preview appears after scoring.</p>;
+
+  const max = Math.max(...recent.map((row) => Math.abs(row.amount)), 1);
+
+  return (
+    <div className="cash-bars" aria-label="Recent cash movement preview">
+      {recent.map((row, index) => {
+        const height = Math.max(10, Math.round((Math.abs(row.amount) / max) * 100));
+        return (
+          <div className="cash-bar" key={`${row.date}-${row.description}-${index}`}>
+            <i className={row.amount >= 0 ? 'inflow' : 'outflow'} style={{ height: `${height}%` }} />
+            <span>{row.date ? row.date.slice(5) : `Tx ${index + 1}`}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function PaymentList({ payments }) {
   if (!payments?.length) {
     return <p className="empty-state">No Fuji payments have been recorded yet.</p>;
@@ -151,6 +172,7 @@ function PaymentList({ payments }) {
           </div>
           <div className="payment-amount">{Number(payment.amount).toFixed(4)} AVAX</div>
           <code>{payment.sender}</code>
+          {payment.explorerUrl && <a className="inline-link" href={payment.explorerUrl} target="_blank" rel="noreferrer">View tx</a>}
         </div>
       ))}
     </div>
@@ -161,28 +183,45 @@ export default function App() {
   const [rows, setRows] = useState([]);
   const [score, setScore] = useState(null);
   const [report, setReport] = useState('');
+  const [reportGeneratedAt, setReportGeneratedAt] = useState('');
   const [loading, setLoading] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [payments, setPayments] = useState([]);
+  const [config, setConfig] = useState(null);
+  const [paymentLogAddress, setPaymentLogAddress] = useState(ENV_PAYMENT_LOG_ADDRESS);
   const [recordLabel, setRecordLabel] = useState('Customer deposit - Fuji test');
   const [recordAmount, setRecordAmount] = useState('0.01');
   const [recordStatus, setRecordStatus] = useState('');
   const [error, setError] = useState('');
+  const [activeSection, setActiveSection] = useState('overview');
 
   const risk = getRiskConfig(score);
   const runwayPercent = score && Number.isFinite(score.runwayMonths) ? Math.min(100, Math.max(0, (score.runwayMonths / 6) * 100)) : 0;
+
+  async function loadConfig() {
+    try {
+      const response = await fetch(`${backendUrl}/config`);
+      const data = await response.json();
+      setConfig(data);
+      setPaymentLogAddress(data.paymentLogAddress || ENV_PAYMENT_LOG_ADDRESS);
+    } catch (err) {
+      setPaymentLogAddress(ENV_PAYMENT_LOG_ADDRESS);
+    }
+  }
 
   async function loadPayments() {
     try {
       const response = await fetch(`${backendUrl}/onchain-payments`);
       const data = await response.json();
       setPayments(data.payments || []);
+      if (data.contractExplorerUrl) setPaymentLogAddress(data.contractExplorerUrl);
     } catch (err) {
       setPayments([]);
     }
   }
 
   useEffect(() => {
+    loadConfig();
     loadPayments();
   }, []);
 
@@ -198,6 +237,7 @@ export default function App() {
         setRows(normalized);
         setScore(null);
         setReport('');
+        setReportGeneratedAt('');
         setError('');
         setRecordStatus('');
       },
@@ -210,6 +250,7 @@ export default function App() {
     setLoading(true);
     setError('');
     setRecordStatus('');
+    setActiveSection('score');
     try {
       const response = await fetch(`${backendUrl}/score`, {
         method: 'POST',
@@ -217,9 +258,10 @@ export default function App() {
         body: JSON.stringify({ transactions: rows }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Scoring failed');
+      if (!response.ok) throw new Error(data.error?.message || data.error || 'Scoring failed');
       setScore(data);
       setReport('');
+      setReportGeneratedAt('');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -231,6 +273,7 @@ export default function App() {
     if (!score) return;
     setReportLoading(true);
     setError('');
+    setActiveSection('report');
     try {
       const response = await fetch(`${backendUrl}/report`, {
         method: 'POST',
@@ -238,8 +281,9 @@ export default function App() {
         body: JSON.stringify({ score }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Report failed');
+      if (!response.ok) throw new Error(data.error?.message || data.error || 'Report failed');
       setReport(data.report || '');
+      setReportGeneratedAt(data.generatedAt ? new Date(data.generatedAt).toLocaleString('en-KE') : '');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -261,7 +305,7 @@ export default function App() {
   }
 
   async function recordPayment() {
-    if (!PAYMENT_LOG_ADDRESS) {
+    if (!paymentLogAddress || paymentLogAddress.startsWith('https://')) {
       setRecordStatus('PaymentLog address is not configured yet.');
       return;
     }
@@ -273,13 +317,14 @@ export default function App() {
 
     setRecordStatus('Switching wallet to Fuji testnet...');
     setError('');
+    setActiveSection('chain');
 
     try {
       await ensureFujiNetwork();
       setRecordStatus('Requesting wallet signature...');
       const provider = new BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
-      const contract = new Contract(PAYMENT_LOG_ADDRESS, PAYMENT_LOG_ABI, signer);
+      const contract = new Contract(paymentLogAddress, PAYMENT_LOG_ABI, signer);
       const tx = await contract.recordPayment(recordLabel.trim(), parseUnits(recordAmount, 18));
       setRecordStatus('Waiting for Fuji confirmation...');
       await tx.wait();
@@ -292,23 +337,37 @@ export default function App() {
     }
   }
 
+  const navItems = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'upload', label: 'CSV' },
+    { id: 'score', label: 'Score' },
+    { id: 'report', label: 'Report' },
+    { id: 'chain', label: 'Chain' },
+  ];
+
   return (
     <main className="app-shell">
       <div className="topbar">
-        <div className="brand">
+        <a href="#overview" className="brand" onClick={() => setActiveSection('overview')}>
           <span className="brand-mark" />
           <div>
             <strong>Mizani</strong>
             <span>Cash Flow Risk Tool</span>
           </div>
-        </div>
+        </a>
+        <nav className="nav-links" aria-label="Primary navigation">
+          {navItems.map((item) => (
+            <button key={item.id} className={activeSection === item.id ? 'active' : ''} onClick={() => setActiveSection(item.id)}>{item.label}</button>
+          ))}
+        </nav>
+        <a className="topbar-cta" href="#upload">Start demo</a>
         <div className="topbar-status">
           <span className="pulse" />
-          Kuzana MVP on dev
+          {config?.version || 'MVP'}
         </div>
       </div>
 
-      <section className="hero">
+      <section className="hero" id="overview">
         <div className="hero-copy">
           <p className="eyebrow">Kuzana Bounty 1 · Stage 1 MVP</p>
           <h1>See cash-flow risk before it becomes a founder emergency.</h1>
@@ -380,7 +439,7 @@ export default function App() {
           {rows.length > 0 && <p className="helper-text">Raw rows stay in the browser until you submit them for scoring.</p>}
         </div>
 
-        <div className="card score-card">
+        <div className="card score-card" id="score">
           <div className="card-head">
             <div>
               <p className="eyebrow">Step 2</p>
@@ -409,6 +468,10 @@ export default function App() {
                 <div><span>Days since inflow</span><strong>{score.metrics?.daysSinceLastInflow ?? 'N/A'}</strong></div>
                 <div><span>Has balance column</span><strong>{score.metrics?.hasBalanceColumn ? 'Yes' : 'No'}</strong></div>
               </div>
+              <div className="card-section">
+                <h3>Cash movement preview</h3>
+                <CashFlowBars transactions={score.transactions} />
+              </div>
             </>
           )}
 
@@ -418,7 +481,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="card report-card">
+        <div className="card report-card" id="report">
           <div className="card-head">
             <div>
               <p className="eyebrow">Step 3</p>
@@ -427,7 +490,12 @@ export default function App() {
           </div>
           <p className="helper-text">Generate a concise controller-style note from the scored numbers. The report excludes raw CSV rows.</p>
           <button onClick={generateReport} disabled={!score || reportLoading}>{reportLoading ? 'Generating...' : 'Generate Gemini report'}</button>
-          {report ? <article className="report">{report}</article> : <div className="report-placeholder">The finance note will appear here after scoring.</div>}
+          {report ? (
+            <>
+              {reportGeneratedAt && <p className="report-meta">Generated {reportGeneratedAt}</p>}
+              <article className="report">{report}</article>
+            </>
+          ) : <div className="report-placeholder">The finance note will appear here after scoring.</div>}
         </div>
       </section>
 
@@ -450,8 +518,7 @@ export default function App() {
           </div>
           <button onClick={recordPayment}>Record Payment</button>
           {recordStatus && <p className="status-text">{recordStatus}</p>}
-          {!PAYMENT_LOG_ADDRESS && <p className="warning">Set VITE_PAYMENT_LOG_ADDRESS after deploying PaymentLog.sol.</p>}
-          {PAYMENT_LOG_ADDRESS && <a className="inline-link" href={`https://testnet.snowtrace.io/address/${PAYMENT_LOG_ADDRESS}`} target="_blank" rel="noreferrer">Open contract on Snowtrace</a>}
+          {!paymentLogAddress || paymentLogAddress.startsWith('https://') ? <p className="warning">Set VITE_PAYMENT_LOG_ADDRESS or backend PAYMENT_LOG_ADDRESS after deploying PaymentLog.sol.</p> : <a className="inline-link" href={`${config?.snowtraceBaseUrl || 'https://testnet.snowtrace.io'}/address/${paymentLogAddress}`} target="_blank" rel="noreferrer">Open contract on Snowtrace</a>}
         </div>
 
         <div className="card payments-card">
@@ -497,6 +564,14 @@ export default function App() {
           </div>
         </div>
       </section>
+
+      <footer className="footer">
+        <div>
+          <strong>Mizani</strong>
+          <span>Kuzana Bounty 1 MVP · Cash-flow risk + Fuji payment log</span>
+        </div>
+        <p>Simulated Zoho via CSV. Fuji testnet payments are demo data unless independently verified.</p>
+      </footer>
 
       {error && <div className="toast" role="alert">{error}</div>}
     </main>
