@@ -1,5 +1,8 @@
 const PROJECT_ID = import.meta.env.VITE_APPWRITE_PROJECT_ID || '6a366796002ca5f0af34';
 
+const CORE_FUNCTION_ID = '6a3a767c00079ee24e27';
+const REPORT_FUNCTION_ID = '6a3a77c4001927f93b5a';
+
 async function executeFunc(functionId, body = {}) {
   const url = `/api/proxy?path=functions/${functionId}/executions`;
   const res = await fetch(url, {
@@ -31,17 +34,17 @@ async function executeFunc(functionId, body = {}) {
 }
 
 export function fetchConfig() {
-  return executeFunc('mizani_core', { action: 'config' });
+  return executeFunc(CORE_FUNCTION_ID, { action: 'config' });
 }
 
 export function fetchPayments() {
-  return executeFunc('mizani_core', { action: 'payments' });
+  return executeFunc(CORE_FUNCTION_ID, { action: 'payments' });
 }
 
 export function execScoreCsv(transactions) {
-  return executeFunc('mizani_core', { action: 'score', transactions });
+  return executeFunc(CORE_FUNCTION_ID, { action: 'score', transactions });
 }
 
 export function execGenerateReport(score) {
-  return executeFunc('mizani_generate_report', { score });
+  return executeFunc(REPORT_FUNCTION_ID, { score });
 }
