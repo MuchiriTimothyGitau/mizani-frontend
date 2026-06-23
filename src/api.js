@@ -15,10 +15,17 @@ async function executeFunc(functionId, body = {}) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     });
-    const parsed = JSON.parse(execution.responseBody || '{}');
-    if (parsed && parsed.ok === false) {
-      throw new Error(parsed.error || 'Function execution failed');
+
+    if (!execution || !execution.responseBody) {
+      throw new Error('No response from server');
     }
+
+    const parsed = JSON.parse(execution.responseBody);
+
+    if (execution.statusCode >= 400 || (parsed && parsed.ok === false)) {
+      throw new Error(parsed?.error || execution.responseBody || `Server error ${execution.statusCode}`);
+    }
+
     return parsed;
   } catch (error) {
     console.error(`Error executing ${functionId}:`, error);
