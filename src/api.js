@@ -12,10 +12,15 @@ async function executeFunc(functionId, body = {}) {
       functionId,
       JSON.stringify(body),
       false,
+      null,
       'POST',
       { 'Content-Type': 'application/json' }
     );
-    return JSON.parse(execution.responseBody || '{}');
+    const parsed = JSON.parse(execution.responseBody || '{}');
+    if (parsed && parsed.ok === false) {
+      throw new Error(parsed.error || 'Function execution failed');
+    }
+    return parsed;
   } catch (error) {
     console.error(`Error executing ${functionId}:`, error);
     throw error;
@@ -35,5 +40,5 @@ export function execScoreCsv(transactions) {
 }
 
 export function execGenerateReport(score) {
-  return executeFunc('mizani-ai', { score });
+  return executeFunc('mizani-generate-report', { score });
 }
