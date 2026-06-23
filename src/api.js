@@ -1,8 +1,8 @@
-const APPWRITE_ENDPOINT = import.meta.env.VITE_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1';
-const PROJECT_ID = import.meta.env.VITE_APPWRITE_PROJECT_ID || '';
+const APPWRITE_PROXY = '/api/appwrite';
+const PROJECT_ID = import.meta.env.VITE_APPWRITE_PROJECT_ID || '6a366796002ca5f0af34';
 
 async function executeFunc(functionId, body = {}) {
-  const url = `${APPWRITE_ENDPOINT}/functions/${functionId}/executions`;
+  const url = `${APPWRITE_PROXY}/functions/${functionId}/executions`;
   const res = await fetch(url, {
     method: 'POST',
     headers: {
