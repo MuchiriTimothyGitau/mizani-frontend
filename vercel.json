@@ -2,12 +2,6 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "installCommand": "npm install",
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
-  ],
   "env": {
     "VITE_APPWRITE_ENDPOINT": "https://fra.cloud.appwrite.io/v1",
     "VITE_APPWRITE_PROJECT_ID": "6a366796002ca5f0af34",

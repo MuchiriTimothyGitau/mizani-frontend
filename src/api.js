@@ -1,8 +1,7 @@
-const APPWRITE_PROXY = '/api/appwrite';
 const PROJECT_ID = import.meta.env.VITE_APPWRITE_PROJECT_ID || '6a366796002ca5f0af34';
 
 async function executeFunc(functionId, body = {}) {
-  const url = `${APPWRITE_PROXY}/functions/${functionId}/executions`;
+  const url = `/api/proxy?path=functions/${functionId}/executions`;
   const res = await fetch(url, {
     method: 'POST',
     headers: {
