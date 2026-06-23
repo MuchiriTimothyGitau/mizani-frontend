@@ -8,14 +8,13 @@ export const functions = new Functions(client);
 
 async function executeFunc(functionId, body = {}) {
   try {
-    const execution = await functions.createExecution(
+    const execution = await functions.createExecution({
       functionId,
-      JSON.stringify(body),
-      false,
-      null,
-      'POST',
-      { 'Content-Type': 'application/json' }
-    );
+      body: JSON.stringify(body),
+      async: false,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
     const parsed = JSON.parse(execution.responseBody || '{}');
     if (parsed && parsed.ok === false) {
       throw new Error(parsed.error || 'Function execution failed');
