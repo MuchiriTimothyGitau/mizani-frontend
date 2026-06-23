@@ -295,7 +295,7 @@ export default function App() {
 
   const risk = getRiskConfig(score);
   const runwayPercent = score && Number.isFinite(score.runwayMonths) ? Math.min(100, Math.max(0, (score.runwayMonths / 6) * 100)) : 0;
-  const backendStatus = config?.geminiConfigured && config?.fujiRpcConfigured ? 'Backend ready' : config?.geminiConfigured ? 'Gemini ready' : config ? 'Backend connected' : 'Connecting';
+  const backendStatus = config?.deepseekConfigured && config?.fujiRpcConfigured ? 'Backend ready' : config?.deepseekConfigured ? 'AI ready' : config ? 'Backend connected' : 'Connecting';
   const csvInflows = rows.filter((row) => row.amount > 0).reduce((sum, row) => sum + row.amount, 0);
   const csvOutflows = rows.filter((row) => row.amount < 0).reduce((sum, row) => sum + Math.abs(row.amount), 0);
 
@@ -406,7 +406,7 @@ export default function App() {
     try {
       await copyText(report);
       setReportCopied(true);
-      addActivity('Gemini report copied', 'success');
+      addActivity('AI report copied', 'success');
       setTimeout(() => setReportCopied(false), 1800);
     } catch (err) {
       setRecordStatus('Could not copy report.');
@@ -469,7 +469,7 @@ export default function App() {
       setReport(data.report || '');
       setReportCopied(false);
       setReportGeneratedAt(data.generatedAt ? new Date(data.generatedAt).toLocaleString('en-KE') : '');
-      addActivity('Gemini finance note generated', 'success');
+      addActivity('AI finance note generated', 'success');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -594,7 +594,7 @@ export default function App() {
       <section className="source-strip" aria-label="Data sources">
         <SourceCard title="Simulated Zoho CSV" badge="CSV" description="Fast MVP path for founders without a live accounting integration." />
         <SourceCard title="Rule-based scorer" badge="Rules" description="Burn rate, runway, concentration, burn acceleration, and unusual withdrawals." />
-        <SourceCard title="Gemini finance note" badge="AI" description="Plain-language explanation written from scored numbers only." />
+        <SourceCard title="AI finance note" badge="AI" description="Plain-language explanation written from scored numbers only." />
         <SourceCard title="Fuji payment log" badge="Chain" description="One on-chain event used as a second data source for the MVP." />
       </section>
 
@@ -607,7 +607,7 @@ export default function App() {
           <div><strong>Use for</strong><p>Founder checks, cash-flow conversations, and deciding what to reconcile first.</p></div>
           <div><strong>Do not use for</strong><p>Tax, audit, credit, legal, or investment decisions without human review.</p></div>
           <div><strong>CSV source</strong><p>Zoho is simulated through CSV upload. Confirm important figures against the actual accounting system.</p></div>
-          <div><strong>AI note</strong><p>Gemini summarizes the scored data and may miss context not present in the CSV.</p></div>
+            <div><strong>AI note</strong><p>DeepSeek summarizes the scored data and may miss context not present in the CSV.</p></div>
           <div><strong>On-chain proof</strong><p>Fuji events prove a wallet recorded data, not that a real customer paid unless verified offline.</p></div>
           <div><strong>Privacy</strong><p>Do not upload unnecessary personal data. Raw CSV rows are only sent when you click Score CSV.</p></div>
         </div>
@@ -693,7 +693,7 @@ export default function App() {
             <button className="ghost-button" onClick={copyReport} disabled={!report}>{reportCopied ? 'Copied' : 'Copy'}</button>
           </div>
           <p className="helper-text">Generate a concise controller-style note from the scored numbers. The report excludes raw CSV rows.</p>
-          <button onClick={generateReport} disabled={!score || reportLoading}>{reportLoading ? 'Generating...' : 'Generate Gemini report'}</button>
+          <button onClick={generateReport} disabled={!score || reportLoading}>{reportLoading ? 'Generating...' : 'Generate AI report'}</button>
           {reportLoading ? (
             <SkeletonGrid />
           ) : report ? (
@@ -768,7 +768,7 @@ export default function App() {
           </div>
           <div className="trust-grid">
             <div><strong>No private keys</strong><span>Backend reads chain only; wallet signs in browser.</span></div>
-            <div><strong>Server-side AI</strong><span>Gemini key stays in backend environment variables.</span></div>
+            <div><strong>Server-side AI</strong><span>DeepSeek key stays in backend environment variables.</span></div>
             <div><strong>Input limits</strong><span>Label length, amount range, row count, and JSON size are constrained.</span></div>
             <div><strong>Honest scope</strong><span>Zoho is simulated via CSV and Fuji is testnet data.</span></div>
           </div>

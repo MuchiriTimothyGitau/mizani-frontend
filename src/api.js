@@ -23,17 +23,17 @@ async function executeFunc(functionId, body = {}) {
 }
 
 export function fetchConfig() {
-  return executeFunc('mizani-config');
+  return executeFunc('mizani-core', { action: 'config' });
 }
 
 export function fetchPayments() {
-  return executeFunc('mizani-onchain-payments');
+  return executeFunc('mizani-core', { action: 'payments' });
 }
 
 export function execScoreCsv(transactions) {
-  return executeFunc('mizani-score-csv', { transactions });
+  return executeFunc('mizani-core', { action: 'score', transactions });
 }
 
 export function execGenerateReport(score) {
-  return executeFunc('mizani-generate-report', { score });
+  return executeFunc('mizani-ai', { score });
 }
